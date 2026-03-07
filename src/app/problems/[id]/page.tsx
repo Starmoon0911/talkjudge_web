@@ -4,7 +4,11 @@ import React, { useState, useEffect } from "react";
 import CodeEditor from "@/components/editor/CodeEditor";
 import useProblems from "@/hooks/useProblems";
 import { useRouter, useParams } from "next/navigation";
-
+import api from "@/lib/api";
+const LANGUAGE_ID: Record<string, number> = {
+    cpp: 105,
+    python: 113,
+};
 const difficultyConfig: Record<string, { label: string; color: string; bg: string }> = {
     easy: { label: "Easy", color: "#22c55e", bg: "rgba(34,197,94,0.1)" },
     medium: { label: "Medium", color: "#f59e0b", bg: "rgba(245,158,11,0.1)" },
@@ -26,7 +30,14 @@ export default function ProblemEditorPage() {
     const [language, setLanguage] = useState("python");
     const [code, setCode] = useState(STARTER.python);
     const [activeTab, setActiveTab] = useState<"description" | "samples">("description");
-    const [result, setResult] = useState<{ status: "idle" | "running" | "accepted" | "wrong" | "error"; output?: string; expected?: string; time?: number }>({ status: "idle" });
+    const [result, setResult] = useState<{
+        status: "idle" | "accepted" | "wrong_answer" | "running" | "error";
+        output?: string;
+        expected?: string;
+        time?: number;
+        stderr?: string;
+        compile_output?: string;
+    }>({ status: "idle" });
     const [copied, setCopied] = useState(false);
 
     const problem = data?.[0];
@@ -39,9 +50,24 @@ export default function ProblemEditorPage() {
 
     const handleRun = async () => {
         setResult({ status: "running" });
-        // Simulate execution — replace with real API call
-        await new Promise((r) => setTimeout(r, 1200));
-        setResult({ status: "accepted", output: problem?.samples?.[0]?.output ?? "—", expected: problem?.samples?.[0]?.output ?? "—", time: 42 });
+        try {
+            const response = await api.post('/run', {
+                problem_id: problem.id,
+                source_code: code,
+                language_id: LANGUAGE_ID[language],
+            });
+            const data = response.data;
+            setResult({
+                status: data.status.id === 3 ? "accepted" : "wrong_answer",
+                output: data.stdout ?? "",
+                expected: data.expected ?? "",
+                stderr: data.stderr,
+                compile_output: data.compile_output,
+                time: data.time,
+            });
+        } catch (err) {
+            setResult({ status: "error" });
+        }
     };
 
     const handleCopy = () => {
@@ -50,13 +76,13 @@ export default function ProblemEditorPage() {
         setTimeout(() => setCopied(false), 1500);
     };
 
-    const statusBar = {
+    const statusBar = ({
         idle: { text: "Ready", color: "#6b7280" },
         running: { text: "Running…", color: "#f59e0b" },
         accepted: { text: "Accepted", color: "#22c55e" },
-        wrong: { text: "Wrong Answer", color: "#ef4444" },
+        wrong_answer: { text: "Wrong Answer", color: "#ef4444" },
         error: { text: "Runtime Error", color: "#ef4444" },
-    }[result.status];
+    } as const)[result.status] ?? { text: "Ready", color: "#6b7280" };
 
     if (loading) return (
         <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#0d1117", color: "#6b7280", fontFamily: "'JetBrains Mono', monospace", fontSize: 14 }}>
@@ -329,7 +355,7 @@ export default function ProblemEditorPage() {
                                         Executing…
                                     </div>
                                 )}
-                                {(result.status === "accepted" || result.status === "wrong") && (
+                                {(result.status === "accepted" || result.status === "wrong_answer") && (
                                     <div className="result-grid">
                                         <span className="result-label">Status</span>
                                         <span
